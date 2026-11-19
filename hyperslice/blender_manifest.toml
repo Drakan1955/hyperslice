@@ -1,0 +1,19 @@
+schema_version = "1.0.0"
+
+id = "hyperslice"
+version = "1.0.0"
+name = "Hyperslice"
+tagline = "Saddle-branch sculptures after Séquin's Sculpture Generator"
+maintainer = "Costantino Vita (Drakan) <hyperslice.addon@gmail.com>"
+type = "add-on"
+website = "https://github.com/Drakan1955/hyperslice"
+
+tags = ["Mesh", "Modeling", "Object"]
+
+blender_version_min = "4.2.0"
+
+license = ["SPDX:GPL-3.0-or-later"]
+copyright = ["2026 Costantino Vita"]
+
+[permissions]
+files = "Read and write parameter, preset and STL files"
