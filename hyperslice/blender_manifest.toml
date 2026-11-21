@@ -1,14 +1,14 @@
 schema_version = "1.0.0"
 
 id = "hyperslice"
-version = "1.0.0"
+version = "1.0.1"
 name = "Hyperslice"
 tagline = "Saddle-branch sculptures after Séquin's Sculpture Generator"
 maintainer = "Costantino Vita (Drakan) <hyperslice.addon@gmail.com>"
 type = "add-on"
 website = "https://github.com/Drakan1955/hyperslice"
 
-tags = ["Mesh", "Modeling", "Object"]
+tags = ["Add Mesh"]
 
 blender_version_min = "4.2.0"
 

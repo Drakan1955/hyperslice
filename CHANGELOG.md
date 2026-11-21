@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.1 — 2026-11-21
+Changes requested in the extensions.blender.org review.
+- The per-frame handler has been removed: the add-on no longer registers any frame-change or render handler.
+- The "Animation" checkbox is replaced by a **Bake animation** button: it calculates the shape at every frame of a
+  range (Start, End, Step) from the animated parameters and stores it as shape keys on a new plain mesh named
+  "<name>_baked". The original sculpture is left untouched and is hidden in the viewport (still in the Outliner). Integer parameters (branches, storeys, detail) cannot be baked: the operation stops
+  with a message that names the frame.
+- Manifest: the only tag is now "Add Mesh".
+- Manuals and panel pictures updated.
+
 ## 1.0.0 — 2026-11-19
 First public release.
 - Public contact address and repository link in the manifest.

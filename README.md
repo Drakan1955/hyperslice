@@ -21,7 +21,7 @@ Parameters update in real time and the result is always an ordinary mesh, ready 
 - Random variant and Tweak buttons to explore.
 - Reads and writes the original `.sg1` parameter files (extra Hyperslice lines are written at the end, where the original program ignores them).
 - Watertightness check and binary STL export scaled to the size you want in millimetres.
-- Animation of the parameters; Freeze to get a plain mesh.
+- Bake animation: animated parameters (keyframes or drivers) are baked into shape keys; Freeze to get a plain mesh.
 - Interface in English, Italian, French, German and Spanish (follows Blender's language).
 
 ![Presets](docs/images/presets-demo.png)

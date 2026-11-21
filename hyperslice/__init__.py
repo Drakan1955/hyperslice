@@ -4,7 +4,7 @@
 bl_info = {
     "name": "Hyperslice",
     "author": "Drakan & Claude",
-    "version": (1, 0, 0),
+    "version": (1, 0, 1),
     "blender": (4, 2, 0),
     "location": "3D Viewport > Sidebar (N) > Hyperslice  |  Add > Mesh",
     "description": "Scherk towers, saddle branches, twist and Collins toroidal closure, "
@@ -17,7 +17,6 @@ import bpy.utils.previews
 import numpy as np
 from bpy.props import (BoolProperty, EnumProperty, FloatProperty, FloatVectorProperty,
                        IntProperty, PointerProperty, StringProperty)
-from bpy.app.handlers import persistent
 from bpy.types import Menu, Operator, Panel, PropertyGroup
 
 import math
@@ -368,9 +367,6 @@ class SG1Props(PropertyGroup):
     is_sculpture: BoolProperty(default=False)
     live: BoolProperty(name="Live update", default=True,
                        description="Recompute the sculpture while you move the sliders")
-    animate: BoolProperty(name="Animation", default=False,
-                          description="Recompute the sculpture at every frame, so that animated sliders "
-                                      "(keyframes or drivers) change its shape. Uses the full detail when rendering")
     live_cap: BoolProperty(name="Limit live detail", default=True,
                            description="If the mesh would be too heavy, temporarily lowers the "
                                        "detail; 'Regenerate' always uses the full value")
@@ -837,6 +833,157 @@ class SG1_OT_freeze(Operator):
         return {"FINISHED"}
 
 
+BAKE_MAX_SHAPES = 500
+
+
+def _frame_verts(p):
+    """Raw vertices of the sculpture for the parameters p (same call path as regenerate)."""
+    if p.get("uv_map"):
+        return core.generate(p, with_uv=True)[0]
+    return core.generate(p)[0]
+
+
+def _fcurves_of(id_data):
+    """F-curves of the action of id_data (works with the slotted actions of Blender 4.4+ and with 4.2)."""
+    ad = id_data.animation_data
+    act = ad.action if ad else None
+    if act is None:
+        return []
+    try:
+        from bpy_extras import anim_utils
+        cb = anim_utils.action_get_channelbag_for_slot(act, ad.action_slot)
+        return list(cb.fcurves) if cb is not None else []
+    except (ImportError, AttributeError):
+        return list(act.fcurves)
+
+
+def _weld_keep(verts, props):
+    """Indices of the raw vertices that survive the weld done by regenerate (same tolerance)."""
+    import bmesh
+    bm = bmesh.new()
+    for v in verts:
+        bm.verts.new((float(v[0]), float(v[1]), float(v[2])))
+    bm.verts.ensure_lookup_table()
+    ext = float(np.ptp(verts, axis=0).max()) if len(verts) else 1.0
+    tol = max(1e-6, min(WELD_REL * ext, 0.05 * max(props.thickness * props.scale, 1e-4)))
+    merged = bmesh.ops.find_doubles(bm, verts=bm.verts[:], dist=tol)["targetmap"]
+    gone = {v.index for v in merged}
+    bm.free()
+    return np.array([i for i in range(len(verts)) if i not in gone], dtype=np.int64)
+
+
+class _TopologyChanged(Exception):
+    pass
+
+
+class SG1_OT_bake(Operator):
+    bl_idname = "mesh.sg1_bake_anim"
+    bl_label = "Bake animation"
+    bl_description = ("Calculates the shape at every frame of the range and stores it as shape keys on a "
+                      "new plain mesh. Animated sliders (keyframes or drivers) are read frame by frame")
+    bl_options = {"REGISTER", "UNDO"}
+
+    frame_start: IntProperty(name="Start", default=1)
+    frame_end: IntProperty(name="End", default=250)
+    step: IntProperty(name="Step", default=1, min=1, soft_max=10,
+                      description="Bake every N-th frame; the shapes in between are blended")
+
+    @classmethod
+    def poll(cls, context):
+        o = context.active_object
+        return o is not None and o.type == "MESH" and o.sg1.is_sculpture
+
+    def invoke(self, context, event):
+        self.frame_start = context.scene.frame_start
+        self.frame_end = context.scene.frame_end
+        return context.window_manager.invoke_props_dialog(self)
+
+    def execute(self, context):
+        src = context.active_object
+        sc = context.scene
+        if self.frame_end < self.frame_start:
+            self.report({"ERROR"}, _rpt("End frame is before the start frame"))
+            return {"CANCELLED"}
+        frames = list(range(self.frame_start, self.frame_end + 1, self.step))
+        if frames[-1] != self.frame_end:
+            frames.append(self.frame_end)
+        if len(frames) > BAKE_MAX_SHAPES:
+            self.report({"ERROR"}, _rpt("Too many shapes ({n}): raise Step or shorten the range", n=len(frames)))
+            return {"CANCELLED"}
+
+        wm = context.window_manager
+        old_frame = sc.frame_current
+        new = None
+        wm.progress_begin(0, len(frames))
+        try:
+            sc.frame_set(frames[0])
+            new = src.copy()
+            new.data = src.data.copy()
+            new.animation_data_clear()
+            new.name = src.name + "_baked"
+            new.data.name = src.data.name + "_baked"
+            context.collection.objects.link(new)
+            regenerate(new, force_full=True)
+            nv = len(new.data.vertices)
+            raw0 = _frame_verts(_params(new.sg1))
+            keep = _weld_keep(raw0, new.sg1)
+            base = np.empty(nv * 3, dtype=np.float32)
+            new.data.vertices.foreach_get("co", base)
+            if len(keep) != nv or not np.allclose(raw0[keep].ravel(), base, atol=1e-4 * max(1.0, float(np.abs(base).max()))):
+                raise RuntimeError("weld mismatch")
+            new.shape_key_add(name="Basis", from_mix=False)
+            for i, f in enumerate(frames):
+                sc.frame_set(f)
+                verts = _frame_verts(_params(src.sg1))
+                if len(verts) != len(raw0):
+                    raise _TopologyChanged(f)
+                key = new.shape_key_add(name="F%d" % f, from_mix=False)
+                key.data.foreach_set("co", verts[keep].astype(np.float32).ravel())
+                if i > 0:
+                    key.value = 0.0
+                    key.keyframe_insert("value", frame=frames[i - 1])
+                key.value = 1.0
+                key.keyframe_insert("value", frame=f)
+                if i < len(frames) - 1:
+                    key.value = 0.0
+                    key.keyframe_insert("value", frame=frames[i + 1])
+                wm.progress_update(i)
+            for fc in _fcurves_of(new.data.shape_keys):
+                for kp in fc.keyframe_points:
+                    kp.interpolation = "LINEAR"
+                fc.update()
+            new.sg1.is_sculpture = False
+        except _TopologyChanged as e:
+            self._discard(new)
+            self.report({"ERROR"}, _rpt("The mesh structure changes at frame {f}: animate only continuous values "
+                                        "(twist, taper, swell, stretch...)", f=e.args[0]))
+            return {"CANCELLED"}
+        except Exception:
+            self._discard(new)
+            raise
+        finally:
+            sc.frame_set(old_frame)
+            wm.progress_end()
+        for o in context.selected_objects:
+            o.select_set(False)
+        new.select_set(True)
+        context.view_layer.objects.active = new
+        try:
+            src.hide_set(True)  # only the animated copy stays visible
+        except Exception:
+            pass
+        self.report({"INFO"}, _rpt("Baked {n} shapes into '{name}'", n=len(frames), name=new.name))
+        return {"FINISHED"}
+
+    @staticmethod
+    def _discard(obj):
+        if obj is not None:
+            mesh = obj.data
+            bpy.data.objects.remove(obj)
+            if mesh.users == 0:
+                bpy.data.meshes.remove(mesh)
+
+
 class SG1_OT_check(Operator):
     bl_idname = "mesh.sg1_check"
     bl_label = "Check watertightness (for 3D printing)"
@@ -1250,7 +1397,6 @@ class SG1_PT_panel(Panel):
         lay.separator()
         lay.prop(p, "live")
         lay.prop(p, "live_cap")
-        lay.prop(p, "animate")
         if p.live_cap and p.last_detail and p.last_detail < p.detail:
             lay.label(text=_fmt("Preview at detail {d}: press Regenerate", d=p.last_detail), icon="INFO")
         lay.label(text=_fmt("Faces: {n}", n=p.last_faces))
@@ -1258,6 +1404,7 @@ class SG1_PT_panel(Panel):
         lay.operator("mesh.sg1_check", icon="CHECKMARK")
         lay.operator("mesh.sg1_export_stl", icon="EXPORT")
         lay.operator("mesh.sg1_freeze", icon="FREEZE")
+        lay.operator("mesh.sg1_bake_anim", icon="ACTION")
         row = lay.row(align=True)
         op = row.operator("mesh.sg1_variant", text="Random variant", icon="FILE_REFRESH")
         op.mode = "NUOVA"
@@ -1275,59 +1422,8 @@ def _menu_add(self, context):
 
 
 classes = (SG1Props, SG1_OT_add, SG1_OT_regen, SG1_OT_preset, SG1_OT_pick_preset,
-           SG1_OT_save_my_preset, SG1_OT_pick_mine, SG1_OT_delete_my_preset, SG1_OT_open_presets, SG1_PT_presets, SG1_OT_export_stl, SG1_OT_freeze,
+           SG1_OT_save_my_preset, SG1_OT_pick_mine, SG1_OT_delete_my_preset, SG1_OT_open_presets, SG1_PT_presets, SG1_OT_export_stl, SG1_OT_freeze, SG1_OT_bake,
            SG1_OT_check, SG1_OT_import, SG1_OT_export, SG1_OT_variant, SG1_PT_panel)
-
-
-# ----- Animazione: ricalcolo a ogni fotogramma -----------------------------
-_RENDERING = False
-_SIGS = {}
-
-
-def _signature(obj, full):
-    p = _params(obj.sg1)
-    return (full,) + tuple(round(float(v), 6) for v in p.values())
-
-
-@persistent
-def _on_frame_change(scene, depsgraph=None):
-    """Ricalcola le sculture con 'Animazione' attiva e parametri cambiati rispetto all'ultimo calcolo."""
-    for obj in scene.objects:
-        if obj.type != 'MESH' or obj.animation_data is None:
-            continue
-        props = obj.sg1
-        if not (props.is_sculpture and props.animate):
-            continue
-        sig = _signature(obj, _RENDERING)
-        key = obj.name_full
-        if _SIGS.get(key) == sig:
-            continue
-        regenerate(obj, force_full=_RENDERING)
-        _SIGS[key] = sig
-
-
-@persistent
-def _on_render_init(*args):
-    global _RENDERING
-    _RENDERING = True
-    _SIGS.clear()
-
-
-@persistent
-def _on_render_end(*args):
-    global _RENDERING
-    _RENDERING = False
-    _SIGS.clear()
-
-
-@persistent
-def _on_load(*args):
-    _SIGS.clear()
-
-
-_HANDLERS = (("frame_change_post", _on_frame_change), ("render_init", _on_render_init),
-             ("render_post", _on_render_end), ("render_cancel", _on_render_end),
-             ("render_complete", _on_render_end), ("load_post", _on_load))
 
 
 def register():
@@ -1335,8 +1431,6 @@ def register():
     _load_previews()
     _MY_PREVIEWS = bpy.utils.previews.new()
     _refresh_my_previews()
-    for name, fn in _HANDLERS:
-        getattr(bpy.app.handlers, name).append(fn)
     bpy.app.translations.register(__name__, translations_it.TRANSLATIONS)
     for c in classes:
         bpy.utils.register_class(c)
@@ -1347,10 +1441,6 @@ def register():
 
 
 def unregister():
-    for name, fn in _HANDLERS:
-        lst = getattr(bpy.app.handlers, name)
-        while fn in lst:
-            lst.remove(fn)
     bpy.types.VIEW3D_MT_mesh_add.remove(_menu_add)
     del bpy.types.Object.sg1
     del bpy.types.WindowManager.sg1_open
