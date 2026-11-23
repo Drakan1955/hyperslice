@@ -2,8 +2,6 @@
 
 # Hyperslice
 
-**Install from Blender Extensions:** in Blender open *Edit > Preferences > Get Extensions*, search for "Hyperslice", or visit https://extensions.blender.org/add-ons/hyperslice/
-
 A Blender add-on that generates abstract sculptures from **Scherk towers**: surfaces with saddle-shaped holes that can be stacked, twisted and bent until they close into rings. It is a port of the geometry of **Sculpture Generator 1** by Carlo H. Séquin (UC Berkeley), rebuilt for Blender in Python/numpy and extended.
 
 Parameters update in real time and the result is always an ordinary mesh, ready for rendering or 3D printing.
@@ -36,6 +34,8 @@ Parameters update in real time and the result is always an ordinary mesh, ready 
 2. In Blender: *Edit ▸ Preferences ▸ Add-ons ▸ Install from Disk…* and choose the zip
    (use `hyperslice-X.Y.Z-extension.zip` on Blender 4.2+; `hyperslice-X.Y.Z.zip` is the classic add-on package).
 3. Open the sidebar (**N**) ▸ *Hyperslice*, or use *Add ▸ Mesh ▸ Hyperslice*.
+
+**Install from Blender Extensions:** in Blender open *Edit > Preferences > Get Extensions*, search for "Hyperslice", or visit https://extensions.blender.org/add-ons/hyperslice/
 
 ## Manual
 
