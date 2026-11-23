@@ -68,4 +68,6 @@ Addon Blender per generare sculture astratte da **torri di Scherk**: superfici c
 
 **Installazione** (Blender 4.2 o successivo): *Edit ▸ Preferences ▸ Add-ons ▸ Install from Disk…* e scegliere lo zip dalla pagina [Releases](../../releases); poi barra laterale (**N**) ▸ *Hyperslice*.
 
+**Installazione da Blender Extensions:** in Blender aprire *Edit > Preferences > Get Extensions*, cercare "Hyperslice", oppure visitare https://extensions.blender.org/add-ons/hyperslice/
+
 **Licenza:** GNU GPL versione 3 o successiva, con il permesso di Séquin per la parte derivata dal suo programma. Hyperslice non è sostenuto né approvato da Séquin o dall'Università della California. Il manuale in italiano è in [`docs/`](docs/). Contatti: hyperslice.addon@gmail.com, oppure aprire una [issue](../../issues).
